@@ -1,29 +1,19 @@
 /**
  * ============================================================
  * Renewal Tracker Automation Script
- * Version : 1.0.0
+ * Version : 2.0.0
  *
- * Designed for:
- *    Power Automate Scheduled Execution
+ * Designed for Power Automate
  *
- * Workbook Structure:
+ * Sheet Pattern:
+ *   1234-567
  *
- * Block 1
- *   Row 2  : Section Title
- *   Row 3  : Header
- *   Row 4-9: Data
- *
- * Block 2
- *   Row 12 : Header
- *   Row 13-40 : Data
- *
- * Features:
- *   - Process sheets matching xxxx-xxx
- *   - Sort by Renewal Date (Column D)
- *   - Highlight rows where Column E = Yes
- *   - Set/Clear sheet tab color
- *   - Collect CC email addresses
- *   - Return execution log to Power Automate
+ * Process:
+ *   1. Sort renewal lists
+ *   2. Highlight renewal alerts
+ *   3. Update tab color
+ *   4. Collect CC email addresses
+ *   5. Return execution result
  * ============================================================
  */
 
@@ -33,7 +23,7 @@ function main(workbook: ExcelScript.Workbook) {
   // Configuration
   // ==========================================================
 
-  const SCRIPT_VERSION = "1.0.0";
+  const SCRIPT_VERSION = "2.0.0";
 
   const SHEET_PATTERN = /^\d{4}-\d{3}$/;
 
@@ -47,7 +37,7 @@ function main(workbook: ExcelScript.Workbook) {
   const ALERT_TAB_COLOR = "#C00000";
 
   // ==========================================================
-  // Return Objects
+  // Return Data
   // ==========================================================
 
   const ccEmails = new Set<string>();
@@ -55,13 +45,13 @@ function main(workbook: ExcelScript.Workbook) {
   const alertSheets: string[] = [];
 
   const failedSheets: {
-    sheet: string,
-    error: string
+    sheet: string;
+    error: string;
   }[] = [];
 
   const sheetEmailMap: {
-    sheet: string,
-    emails: string[]
+    sheet: string;
+    emails: string[];
   }[] = [];
 
   let processedSheets = 0;
@@ -72,7 +62,7 @@ function main(workbook: ExcelScript.Workbook) {
 
   function addEmail(
     value: unknown,
-    localList?: string[]
+    localEmails?: string[]
   ) {
 
     const email =
@@ -88,64 +78,56 @@ function main(workbook: ExcelScript.Workbook) {
       ccEmails.add(email);
 
       if (
-        localList &&
-        !localList.includes(email)
+        localEmails &&
+        !localEmails.includes(email)
       ) {
-        localList.push(email);
+        localEmails.push(email);
       }
     }
   }
 
   // ==========================================================
-  // Check whether a row contains actual data
+  // Sort Block
+  // ==========================================================
+  //
+  // Block 1:
+  //   A3:F9
+  //   Header = Row 3
+  //
+  // Block 2:
+  //   A12:F40
+  //   Header = Row 12
+  //
+  // Sort by D column ascending
+  //
   // ==========================================================
 
-  function rowHasData(row: (string | number | boolean)[]) {
+  function sortBlock(
+    sheet: ExcelScript.Worksheet,
+    rangeAddress: string
+  ) {
 
-    return row.some(cell => {
+    const range =
+      sheet.getRange(rangeAddress);
 
-      if (cell === null) return false;
-      if (cell === undefined) return false;
-
-      return String(cell).trim() !== "";
-
-    });
+    range.getSort().apply(
+      [
+        {
+          key: 3, // D column
+          ascending: true
+        }
+      ],
+      false, // matchCase
+      true,  // hasHeaders
+      ExcelScript.SortOrientation.rows
+    );
   }
 
   // ==========================================================
-  // Convert Excel date value to sortable number
+  // Highlight Alert Rows
   // ==========================================================
 
-  function getSortValue(value: unknown): number {
-
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
-      return Number.MAX_SAFE_INTEGER;
-    }
-
-    // Excel stores dates as numbers
-    if (typeof value === "number") {
-      return value;
-    }
-
-    const parsed =
-      new Date(String(value)).getTime();
-
-    if (isNaN(parsed)) {
-      return Number.MAX_SAFE_INTEGER;
-    }
-
-    return parsed;
-  }
-
-  // ==========================================================
-  // Process One Block
-  // ==========================================================
-
-  function processDataBlock(
+  function processDataRows(
     sheet: ExcelScript.Worksheet,
     dataRangeAddress: string
   ): boolean {
@@ -156,71 +138,30 @@ function main(workbook: ExcelScript.Workbook) {
     const values =
       range.getValues();
 
-    const populatedRows: (string | number | boolean)[][] = [];
-
-    const emptyRows: (string | number | boolean)[][] = [];
-
-    // Separate populated and empty rows
-
-    for (const row of values) {
-
-      if (rowHasData(row)) {
-        populatedRows.push(row);
-      } else {
-        emptyRows.push(row);
-      }
-    }
-
-    // Sort by Column D (index 3)
-
-    populatedRows.sort((a, b) => {
-
-      const dateA =
-        getSortValue(a[3]);
-
-      const dateB =
-        getSortValue(b[3]);
-
-      return dateA - dateB;
-
-    });
-
-    const finalRows =
-      populatedRows.concat(emptyRows);
-
-    // Write sorted rows back
-
-    range.setValues(finalRows);
-
-    // Re-read after sorting
-
-    const sortedValues =
-      range.getValues();
-
-    let blockHasAlert = false;
-
-    // Apply formatting
+    let foundAlert = false;
 
     for (
-      let r = 0;
-      r < sortedValues.length;
-      r++
+      let row = 0;
+      row < values.length;
+      row++
     ) {
-
-      const rowRange =
-        range.getCell(r, 0)
-          .getResizedRange(0, 5);
-
-      const font =
-        rowRange.getFormat()
-          .getFont();
 
       const renewalFlag =
         String(
-          sortedValues[r][4] ?? ""
+          values[row][4] ?? ""
         )
           .trim()
           .toUpperCase();
+
+      const rowRange =
+        range
+          .getCell(row, 0)
+          .getResizedRange(0, 5);
+
+      const font =
+        rowRange
+          .getFormat()
+          .getFont();
 
       if (
         renewalFlag === "YES"
@@ -230,7 +171,7 @@ function main(workbook: ExcelScript.Workbook) {
           ALERT_FONT_COLOR
         );
 
-        blockHasAlert = true;
+        foundAlert = true;
 
       } else {
 
@@ -240,11 +181,11 @@ function main(workbook: ExcelScript.Workbook) {
       }
     }
 
-    return blockHasAlert;
+    return foundAlert;
   }
 
   // ==========================================================
-  // Main Sheet Loop
+  // Main Processing Loop
   // ==========================================================
 
   const sheets =
@@ -265,33 +206,45 @@ function main(workbook: ExcelScript.Workbook) {
 
     try {
 
+      // ------------------------------------------------------
+      // Sort Block 1
+      // ------------------------------------------------------
+
+      sortBlock(
+        sheet,
+        "A3:F9"
+      );
+
+      // ------------------------------------------------------
+      // Sort Block 2
+      // ------------------------------------------------------
+
+      sortBlock(
+        sheet,
+        "A12:F40"
+      );
+
+      // ------------------------------------------------------
+      // Check Alerts
+      // ------------------------------------------------------
+
       let hasAlert = false;
 
-      // ======================================================
-      // Block 1
-      // Row 4 - Row 9
-      // ======================================================
-
       hasAlert =
-        processDataBlock(
+        processDataRows(
           sheet,
           "A4:F9"
         ) || hasAlert;
 
-      // ======================================================
-      // Block 2
-      // Row 13 - Row 40
-      // ======================================================
-
       hasAlert =
-        processDataBlock(
+        processDataRows(
           sheet,
           "A13:F40"
         ) || hasAlert;
 
-      // ======================================================
-      // Sheet Alert Logic
-      // ======================================================
+      // ------------------------------------------------------
+      // Sheet Tab Color
+      // ------------------------------------------------------
 
       if (hasAlert) {
 
