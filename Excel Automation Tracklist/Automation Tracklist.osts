@@ -40,13 +40,13 @@ function main(workbook: ExcelScript.Workbook) {
 
   let sheetEmailMap: string[] = [];
 
-  let ccEmailSet = new Set<string>();
+  let ccEmails: string[] = [];
 
   // ==========================================================
   // Email Helper
   // ==========================================================
 
-  function addEmail(value: any) {
+  function addEmail(value: string) {
 
     const email =
       String(value || "")
@@ -57,7 +57,9 @@ function main(workbook: ExcelScript.Workbook) {
       email &&
       EMAIL_PATTERN.test(email)
     ) {
-      ccEmailSet.add(email);
+      if (!ccEmails.includes(email)) {
+  ccEmails.push(email);
+}
     }
   }
 
@@ -73,12 +75,16 @@ function main(workbook: ExcelScript.Workbook) {
     const range =
       sheet.getRange(rangeAddress);
 
-    range.getSort().apply([
-      {
-        key: 3,
-        ascending: true
-      }
-    ]);
+    range.getSort().apply(
+      [
+        {
+          key: 3,
+          ascending: true
+        }
+      ],
+      false,
+      true
+    );
   }
 
   // ==========================================================
@@ -235,15 +241,15 @@ function main(workbook: ExcelScript.Workbook) {
             EMAIL_PATTERN.test(email)
           ) {
 
-            localEmails.push(
-              email
-            );
+            if (!localEmails.includes(email)) {
+              localEmails.push(email);
+            }
 
-            ccEmailSet.add(
-              email
-            );
+            if (!ccEmails.includes(email)) {
+              ccEmails.push(email);
           }
         }
+      }
 
         sheetEmailMap.push(
           sheetName +
@@ -254,7 +260,7 @@ function main(workbook: ExcelScript.Workbook) {
       } else {
 
         sheet.setTabColor(
-          null
+          ""
         );
       }
 
@@ -284,9 +290,11 @@ function main(workbook: ExcelScript.Workbook) {
     if (readme) {
 
       addEmail(
-        readme
-          .getRange("F1")
-          .getValue()
+        String(
+          readme
+            .getRange("F1")
+            .getValue()
+        )
       );
     }
 
@@ -320,12 +328,10 @@ function main(workbook: ExcelScript.Workbook) {
       alertSheets.length,
 
     emailCount:
-      ccEmailSet.size,
+      ccEmails.length,
 
     ccEmails:
-      Array.from(
-        ccEmailSet
-      ),
+      ccEmails,
 
     alertSheets:
       alertSheets,
