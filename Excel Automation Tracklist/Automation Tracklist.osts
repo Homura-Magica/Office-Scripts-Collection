@@ -1,0 +1,218 @@
+/**
+ * Weekly Renewal Check
+ *
+ * 供 Power Automate 调用
+ *
+ * 功能：
+ * 1. 遍历所有名称符合 xxxx-xxx 的工作表
+ * 2. 对 A2:F9 与 A12:F40 分别排序
+ * 3. 根据 E 列 Yes/No 设置字体颜色
+ * 4. 若存在 Yes：
+ *      - 标签页标红
+ *      - 收集 R2:R4 邮箱
+ * 5. 若不存在 Yes：
+ *      - 清除标签页颜色
+ * 6. 收集 README!F1 邮箱
+ * 7. 返回 Power Automate 所需数据
+ */
+
+function main(workbook: ExcelScript.Workbook) {
+
+  // Sheet名称格式：
+  // 1234-567
+  const SHEET_PATTERN = /^\d{4}-\d{3}$/;
+
+  // 邮箱格式验证
+  const EMAIL_PATTERN =
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+
+  // 去重邮箱
+  const ccEmails = new Set<string>();
+
+  // 有告警的Sheet
+  const alertSheets: string[] = [];
+
+  // 失败记录
+  const failedSheets: {
+    sheet: string,
+    error: string
+  }[] = [];
+
+  let processedSheets = 0;
+
+  const sheets = workbook.getWorksheets();
+
+  /**
+   * 邮箱收集辅助函数
+   */
+  function addEmail(value: unknown) {
+
+    const email =
+      String(value ?? "")
+        .trim()
+        .toLowerCase();
+
+    if (
+      email &&
+      EMAIL_PATTERN.test(email)
+    ) {
+      ccEmails.add(email);
+    }
+  }
+
+  /**
+   * 排序+标色处理
+   */
+  function processRange(
+    sheet: ExcelScript.Worksheet,
+    address: string
+  ): boolean {
+
+    const range = sheet.getRange(address);
+
+    // 按 D 列排序
+    // A=0 B=1 C=2 D=3
+    range.getSort().apply(
+      [
+        {
+          key: 3,
+          ascending: true
+        }
+      ],
+      false,
+      true
+    );
+
+    const values = range.getValues();
+
+    let foundAlert = false;
+
+    // 跳过标题行
+    for (let r = 1; r < values.length; r++) {
+
+      const renewalFlag =
+        String(values[r][4] ?? "")
+          .trim()
+          .toUpperCase();
+
+      const rowRange =
+        range.getCell(r, 0)
+          .getResizedRange(0, 5);
+
+      const font =
+        rowRange.getFormat()
+          .getFont();
+
+      if (renewalFlag === "YES") {
+
+        font.setColor("#FF0000");
+
+        foundAlert = true;
+
+      } else {
+
+        font.setColor("#000000");
+      }
+    }
+
+    return foundAlert;
+  }
+
+  for (const sheet of sheets) {
+
+    const sheetName =
+      sheet.getName();
+
+    if (!SHEET_PATTERN.test(sheetName)) {
+      continue;
+    }
+
+    try {
+
+      let hasAlert = false;
+
+      hasAlert =
+        processRange(sheet, "A2:F9") || hasAlert;
+
+      hasAlert =
+        processRange(sheet, "A12:F40") || hasAlert;
+
+      if (hasAlert) {
+
+        sheet.setTabColor("#FF0000");
+
+        alertSheets.push(sheetName);
+
+        const emailValues =
+          sheet.getRange("R2:R4")
+            .getValues();
+
+        for (const row of emailValues) {
+          addEmail(row[0]);
+        }
+
+      } else {
+
+        // 清除标签颜色
+        sheet.setTabColor(null);
+      }
+
+      processedSheets++;
+
+    } catch (error) {
+
+      failedSheets.push({
+        sheet: sheetName,
+        error: String(error)
+      });
+    }
+  }
+
+  /**
+   * README!F1 邮箱
+   */
+  try {
+
+    const readme =
+      workbook.getWorksheet("README");
+
+    if (readme) {
+
+      addEmail(
+        readme
+          .getRange("F1")
+          .getValue()
+      );
+    }
+
+  } catch (error) {
+
+    failedSheets.push({
+      sheet: "README",
+      error: String(error)
+    });
+  }
+
+  return {
+
+    success: true,
+
+    timestamp:
+      new Date().toISOString(),
+
+    processedSheets,
+
+    alertSheetCount:
+      alertSheets.length,
+
+    emailCount:
+      ccEmails.size,
+
+    ccEmails:
+      Array.from(ccEmails),
+
+    alertSheets,
+
+    failedSheets
+  };
+}

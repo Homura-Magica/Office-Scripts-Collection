@@ -1,0 +1,19 @@
+我需要你为我写一份office script代码以搭配power automate使用。大致的流程如下：power automate会定时启动，例如每个周一早上四点。power automate调用这个office script来自动处理一份excel workbook文件。在处理完成后，power automate会给几个邮箱地址发送邮件并附上处理完成后的excel workbook文件的.xlsx格式的副本。邮件地址需要从excel workbook的对应位置获取。
+
+office script要对所有符合名称规则的sheet执行以下操作：xxxx-xxx 其中x指代任意数字。例如1234-567，8888-888。如果sheet的名称符合上述规则，执行下面的操作。
+
+对A2到F9，和A12到F40这个两个范围内分别进行排序。排序顺序是按照D列的日期顺序，最近的日期排在最上方，最后的日期排在最后面。需要注意的是1，这个范围的第一行是标题，2，这个表中，D列的日期是通过excel函数计算得出。样例差不多如下：
+
+Row/Column  A   B   C   D   E   F
+3   Item	Number 	Baked Date	Renewal Date	Renew in Next 7 Days?	Desired Prepared Date
+4   Cake Big	1	17-Sep-2025	17-Mar-2026	Yes	1-Jul-2026
+
+
+D列的函数为：=IF(C4="","",EDATE(C4,6))
+E列的函数为：=IF(C4="","",IF(TODAY()<(D4-7), "No", "Yes"))
+
+在对A2到F9，和A12到F40这个两个范围分别完成排序操作后，分别读取E列，如果为Yes，则对选择的范围的那一行进行字体标红。如果在执行这一项时，有任意一项被标红，则需顺便把该sheet的标签页标红，读取此页R2-R4位置获取三个邮箱地址（请注意，这些邮箱地址会在后面为后面的power automate流程中成为抄送对象。），如果为No，则将那一行的字体换回默认的黑色。如果没有任意一项被标红，则需要顺便把该sheet的标签页移除颜色。
+
+上述对符合xxxx-xxx规则的操作完成后，读取位于名为README的sheet的F1格并获取一个邮箱地址。此邮箱地址会与前面获取的邮箱地址一起会用于power automate流程。
+
+在以上操作结束后，power automate会进入下一个步骤，发邮件。除了写死在流程中的收件人外，还需要把此前获取到的所有邮箱地址列入其中。此外，还要把一份该workbook的副本以.xlsx格式附载邮件上发出。
