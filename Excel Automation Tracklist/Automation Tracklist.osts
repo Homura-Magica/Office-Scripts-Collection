@@ -1,51 +1,79 @@
 /**
- * Weekly Renewal Check
+ * ============================================================
+ * Renewal Tracker Automation Script
+ * Version : 1.0.0
  *
- * 供 Power Automate 调用
+ * Designed for:
+ *    Power Automate Scheduled Execution
  *
- * 功能：
- * 1. 遍历所有名称符合 xxxx-xxx 的工作表
- * 2. 对 A2:F9 与 A12:F40 分别排序
- * 3. 根据 E 列 Yes/No 设置字体颜色
- * 4. 若存在 Yes：
- *      - 标签页标红
- *      - 收集 R2:R4 邮箱
- * 5. 若不存在 Yes：
- *      - 清除标签页颜色
- * 6. 收集 README!F1 邮箱
- * 7. 返回 Power Automate 所需数据
+ * Workbook Structure:
+ *
+ * Block 1
+ *   Row 2  : Section Title
+ *   Row 3  : Header
+ *   Row 4-9: Data
+ *
+ * Block 2
+ *   Row 12 : Header
+ *   Row 13-40 : Data
+ *
+ * Features:
+ *   - Process sheets matching xxxx-xxx
+ *   - Sort by Renewal Date (Column D)
+ *   - Highlight rows where Column E = Yes
+ *   - Set/Clear sheet tab color
+ *   - Collect CC email addresses
+ *   - Return execution log to Power Automate
+ * ============================================================
  */
 
 function main(workbook: ExcelScript.Workbook) {
 
-  // Sheet名称格式：
-  // 1234-567
+  // ==========================================================
+  // Configuration
+  // ==========================================================
+
+  const SCRIPT_VERSION = "1.0.0";
+
   const SHEET_PATTERN = /^\d{4}-\d{3}$/;
 
-  // 邮箱格式验证
   const EMAIL_PATTERN =
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
-  // 去重邮箱
+  const ALERT_FONT_COLOR = "#C00000";
+
+  const NORMAL_FONT_COLOR = "#000000";
+
+  const ALERT_TAB_COLOR = "#C00000";
+
+  // ==========================================================
+  // Return Objects
+  // ==========================================================
+
   const ccEmails = new Set<string>();
 
-  // 有告警的Sheet
   const alertSheets: string[] = [];
 
-  // 失败记录
   const failedSheets: {
     sheet: string,
     error: string
   }[] = [];
 
+  const sheetEmailMap: {
+    sheet: string,
+    emails: string[]
+  }[] = [];
+
   let processedSheets = 0;
 
-  const sheets = workbook.getWorksheets();
+  // ==========================================================
+  // Email Helper
+  // ==========================================================
 
-  /**
-   * 邮箱收集辅助函数
-   */
-  function addEmail(value: unknown) {
+  function addEmail(
+    value: unknown,
+    localList?: string[]
+  ) {
 
     const email =
       String(value ?? "")
@@ -56,44 +84,128 @@ function main(workbook: ExcelScript.Workbook) {
       email &&
       EMAIL_PATTERN.test(email)
     ) {
+
       ccEmails.add(email);
+
+      if (
+        localList &&
+        !localList.includes(email)
+      ) {
+        localList.push(email);
+      }
     }
   }
 
-  /**
-   * 排序+标色处理
-   */
-  function processRange(
+  // ==========================================================
+  // Check whether a row contains actual data
+  // ==========================================================
+
+  function rowHasData(row: (string | number | boolean)[]) {
+
+    return row.some(cell => {
+
+      if (cell === null) return false;
+      if (cell === undefined) return false;
+
+      return String(cell).trim() !== "";
+
+    });
+  }
+
+  // ==========================================================
+  // Convert Excel date value to sortable number
+  // ==========================================================
+
+  function getSortValue(value: unknown): number {
+
+    if (
+      value === null ||
+      value === undefined ||
+      value === ""
+    ) {
+      return Number.MAX_SAFE_INTEGER;
+    }
+
+    // Excel stores dates as numbers
+    if (typeof value === "number") {
+      return value;
+    }
+
+    const parsed =
+      new Date(String(value)).getTime();
+
+    if (isNaN(parsed)) {
+      return Number.MAX_SAFE_INTEGER;
+    }
+
+    return parsed;
+  }
+
+  // ==========================================================
+  // Process One Block
+  // ==========================================================
+
+  function processDataBlock(
     sheet: ExcelScript.Worksheet,
-    address: string
+    dataRangeAddress: string
   ): boolean {
 
-    const range = sheet.getRange(address);
+    const range =
+      sheet.getRange(dataRangeAddress);
 
-    // 按 D 列排序
-    // A=0 B=1 C=2 D=3
-    range.getSort().apply(
-      [
-        {
-          key: 3,
-          ascending: true
-        }
-      ],
-      false,
-      true
-    );
+    const values =
+      range.getValues();
 
-    const values = range.getValues();
+    const populatedRows: (string | number | boolean)[][] = [];
 
-    let foundAlert = false;
+    const emptyRows: (string | number | boolean)[][] = [];
 
-    // 跳过标题行
-    for (let r = 1; r < values.length; r++) {
+    // Separate populated and empty rows
 
-      const renewalFlag =
-        String(values[r][4] ?? "")
-          .trim()
-          .toUpperCase();
+    for (const row of values) {
+
+      if (rowHasData(row)) {
+        populatedRows.push(row);
+      } else {
+        emptyRows.push(row);
+      }
+    }
+
+    // Sort by Column D (index 3)
+
+    populatedRows.sort((a, b) => {
+
+      const dateA =
+        getSortValue(a[3]);
+
+      const dateB =
+        getSortValue(b[3]);
+
+      return dateA - dateB;
+
+    });
+
+    const finalRows =
+      populatedRows.concat(emptyRows);
+
+    // Write sorted rows back
+
+    range.setValues(finalRows);
+
+    // Re-read after sorting
+
+    const sortedValues =
+      range.getValues();
+
+    let blockHasAlert = false;
+
+    // Apply formatting
+
+    for (
+      let r = 0;
+      r < sortedValues.length;
+      r++
+    ) {
 
       const rowRange =
         range.getCell(r, 0)
@@ -103,27 +215,51 @@ function main(workbook: ExcelScript.Workbook) {
         rowRange.getFormat()
           .getFont();
 
-      if (renewalFlag === "YES") {
+      const renewalFlag =
+        String(
+          sortedValues[r][4] ?? ""
+        )
+          .trim()
+          .toUpperCase();
 
-        font.setColor("#FF0000");
+      if (
+        renewalFlag === "YES"
+      ) {
 
-        foundAlert = true;
+        font.setColor(
+          ALERT_FONT_COLOR
+        );
+
+        blockHasAlert = true;
 
       } else {
 
-        font.setColor("#000000");
+        font.setColor(
+          NORMAL_FONT_COLOR
+        );
       }
     }
 
-    return foundAlert;
+    return blockHasAlert;
   }
+
+  // ==========================================================
+  // Main Sheet Loop
+  // ==========================================================
+
+  const sheets =
+    workbook.getWorksheets();
 
   for (const sheet of sheets) {
 
     const sheetName =
       sheet.getName();
 
-    if (!SHEET_PATTERN.test(sheetName)) {
+    if (
+      !SHEET_PATTERN.test(
+        sheetName
+      )
+    ) {
       continue;
     }
 
@@ -131,30 +267,67 @@ function main(workbook: ExcelScript.Workbook) {
 
       let hasAlert = false;
 
-      hasAlert =
-        processRange(sheet, "A2:F9") || hasAlert;
+      // ======================================================
+      // Block 1
+      // Row 4 - Row 9
+      // ======================================================
 
       hasAlert =
-        processRange(sheet, "A12:F40") || hasAlert;
+        processDataBlock(
+          sheet,
+          "A4:F9"
+        ) || hasAlert;
+
+      // ======================================================
+      // Block 2
+      // Row 13 - Row 40
+      // ======================================================
+
+      hasAlert =
+        processDataBlock(
+          sheet,
+          "A13:F40"
+        ) || hasAlert;
+
+      // ======================================================
+      // Sheet Alert Logic
+      // ======================================================
 
       if (hasAlert) {
 
-        sheet.setTabColor("#FF0000");
+        sheet.setTabColor(
+          ALERT_TAB_COLOR
+        );
 
-        alertSheets.push(sheetName);
+        alertSheets.push(
+          sheetName
+        );
+
+        const localEmails: string[] = [];
 
         const emailValues =
-          sheet.getRange("R2:R4")
+          sheet
+            .getRange("R2:R4")
             .getValues();
 
         for (const row of emailValues) {
-          addEmail(row[0]);
+
+          addEmail(
+            row[0],
+            localEmails
+          );
         }
+
+        sheetEmailMap.push({
+          sheet: sheetName,
+          emails: localEmails
+        });
 
       } else {
 
-        // 清除标签颜色
-        sheet.setTabColor(null);
+        sheet.setTabColor(
+          null
+        );
       }
 
       processedSheets++;
@@ -168,13 +341,16 @@ function main(workbook: ExcelScript.Workbook) {
     }
   }
 
-  /**
-   * README!F1 邮箱
-   */
+  // ==========================================================
+  // README Email
+  // ==========================================================
+
   try {
 
     const readme =
-      workbook.getWorksheet("README");
+      workbook.getWorksheet(
+        "README"
+      );
 
     if (readme) {
 
@@ -193,9 +369,16 @@ function main(workbook: ExcelScript.Workbook) {
     });
   }
 
+  // ==========================================================
+  // Return To Power Automate
+  // ==========================================================
+
   return {
 
     success: true,
+
+    version:
+      SCRIPT_VERSION,
 
     timestamp:
       new Date().toISOString(),
@@ -212,6 +395,8 @@ function main(workbook: ExcelScript.Workbook) {
       Array.from(ccEmails),
 
     alertSheets,
+
+    sheetEmailMap,
 
     failedSheets
   };
