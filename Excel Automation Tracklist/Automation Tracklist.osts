@@ -1,19 +1,11 @@
 /**
  * ============================================================
- * Renewal Tracker Automation Script
- * Version : 2.0.0
+ * Renewal Tracker Automation
+ * Version 2.1
  *
- * Designed for Power Automate
+ * Designed for:
+ * Power Automate + Excel Online
  *
- * Sheet Pattern:
- *   1234-567
- *
- * Process:
- *   1. Sort renewal lists
- *   2. Highlight renewal alerts
- *   3. Update tab color
- *   4. Collect CC email addresses
- *   5. Return execution result
  * ============================================================
  */
 
@@ -23,7 +15,7 @@ function main(workbook: ExcelScript.Workbook) {
   // Configuration
   // ==========================================================
 
-  const SCRIPT_VERSION = "2.0.0";
+  const SCRIPT_VERSION = "2.1.0";
 
   const SHEET_PATTERN = /^\d{4}-\d{3}$/;
 
@@ -40,33 +32,24 @@ function main(workbook: ExcelScript.Workbook) {
   // Return Data
   // ==========================================================
 
-  const ccEmails = new Set<string>();
-
-  const alertSheets: string[] = [];
-
-  const failedSheets: {
-    sheet: string;
-    error: string;
-  }[] = [];
-
-  const sheetEmailMap: {
-    sheet: string;
-    emails: string[];
-  }[] = [];
-
   let processedSheets = 0;
+
+  let alertSheets: string[] = [];
+
+  let failedSheets: string[] = [];
+
+  let sheetEmailMap: string[] = [];
+
+  let ccEmailSet = new Set<string>();
 
   // ==========================================================
   // Email Helper
   // ==========================================================
 
-  function addEmail(
-    value: unknown,
-    localEmails?: string[]
-  ) {
+  function addEmail(value: any) {
 
     const email =
-      String(value ?? "")
+      String(value || "")
         .trim()
         .toLowerCase();
 
@@ -74,32 +57,12 @@ function main(workbook: ExcelScript.Workbook) {
       email &&
       EMAIL_PATTERN.test(email)
     ) {
-
-      ccEmails.add(email);
-
-      if (
-        localEmails &&
-        !localEmails.includes(email)
-      ) {
-        localEmails.push(email);
-      }
+      ccEmailSet.add(email);
     }
   }
 
   // ==========================================================
   // Sort Block
-  // ==========================================================
-  //
-  // Block 1:
-  //   A3:F9
-  //   Header = Row 3
-  //
-  // Block 2:
-  //   A12:F40
-  //   Header = Row 12
-  //
-  // Sort by D column ascending
-  //
   // ==========================================================
 
   function sortBlock(
@@ -110,35 +73,30 @@ function main(workbook: ExcelScript.Workbook) {
     const range =
       sheet.getRange(rangeAddress);
 
-    range.getSort().apply(
-      [
-        {
-          key: 3, // D column
-          ascending: true
-        }
-      ],
-      false, // matchCase
-      true,  // hasHeaders
-      ExcelScript.SortOrientation.rows
-    );
+    range.getSort().apply([
+      {
+        key: 3,
+        ascending: true
+      }
+    ]);
   }
 
   // ==========================================================
-  // Highlight Alert Rows
+  // Highlight Rows
   // ==========================================================
 
-  function processDataRows(
+  function processRows(
     sheet: ExcelScript.Worksheet,
-    dataRangeAddress: string
+    rangeAddress: string
   ): boolean {
 
     const range =
-      sheet.getRange(dataRangeAddress);
+      sheet.getRange(rangeAddress);
 
     const values =
       range.getValues();
 
-    let foundAlert = false;
+    let hasAlert = false;
 
     for (
       let row = 0;
@@ -147,9 +105,7 @@ function main(workbook: ExcelScript.Workbook) {
     ) {
 
       const renewalFlag =
-        String(
-          values[row][4] ?? ""
-        )
+        String(values[row][4] || "")
           .trim()
           .toUpperCase();
 
@@ -171,7 +127,7 @@ function main(workbook: ExcelScript.Workbook) {
           ALERT_FONT_COLOR
         );
 
-        foundAlert = true;
+        hasAlert = true;
 
       } else {
 
@@ -181,11 +137,11 @@ function main(workbook: ExcelScript.Workbook) {
       }
     }
 
-    return foundAlert;
+    return hasAlert;
   }
 
   // ==========================================================
-  // Main Processing Loop
+  // Process Matching Sheets
   // ==========================================================
 
   const sheets =
@@ -207,7 +163,9 @@ function main(workbook: ExcelScript.Workbook) {
     try {
 
       // ------------------------------------------------------
-      // Sort Block 1
+      // Sort Section 1
+      // Header Row = 3
+      // Data Row = 4-9
       // ------------------------------------------------------
 
       sortBlock(
@@ -216,7 +174,9 @@ function main(workbook: ExcelScript.Workbook) {
       );
 
       // ------------------------------------------------------
-      // Sort Block 2
+      // Sort Section 2
+      // Header Row = 12
+      // Data Row = 13-40
       // ------------------------------------------------------
 
       sortBlock(
@@ -225,19 +185,19 @@ function main(workbook: ExcelScript.Workbook) {
       );
 
       // ------------------------------------------------------
-      // Check Alerts
+      // Apply Highlight
       // ------------------------------------------------------
 
       let hasAlert = false;
 
       hasAlert =
-        processDataRows(
+        processRows(
           sheet,
           "A4:F9"
         ) || hasAlert;
 
       hasAlert =
-        processDataRows(
+        processRows(
           sheet,
           "A13:F40"
         ) || hasAlert;
@@ -256,25 +216,40 @@ function main(workbook: ExcelScript.Workbook) {
           sheetName
         );
 
-        const localEmails: string[] = [];
-
         const emailValues =
           sheet
             .getRange("R2:R4")
             .getValues();
 
+        let localEmails: string[] = [];
+
         for (const row of emailValues) {
 
-          addEmail(
-            row[0],
-            localEmails
-          );
+          const email =
+            String(row[0] || "")
+              .trim()
+              .toLowerCase();
+
+          if (
+            email &&
+            EMAIL_PATTERN.test(email)
+          ) {
+
+            localEmails.push(
+              email
+            );
+
+            ccEmailSet.add(
+              email
+            );
+          }
         }
 
-        sheetEmailMap.push({
-          sheet: sheetName,
-          emails: localEmails
-        });
+        sheetEmailMap.push(
+          sheetName +
+          ": " +
+          localEmails.join(", ")
+        );
 
       } else {
 
@@ -287,10 +262,11 @@ function main(workbook: ExcelScript.Workbook) {
 
     } catch (error) {
 
-      failedSheets.push({
-        sheet: sheetName,
-        error: String(error)
-      });
+      failedSheets.push(
+        sheetName +
+        " : " +
+        String(error)
+      );
     }
   }
 
@@ -316,10 +292,10 @@ function main(workbook: ExcelScript.Workbook) {
 
   } catch (error) {
 
-    failedSheets.push({
-      sheet: "README",
-      error: String(error)
-    });
+    failedSheets.push(
+      "README : " +
+      String(error)
+    );
   }
 
   // ==========================================================
@@ -334,23 +310,30 @@ function main(workbook: ExcelScript.Workbook) {
       SCRIPT_VERSION,
 
     timestamp:
-      new Date().toISOString(),
+      new Date()
+        .toISOString(),
 
-    processedSheets,
+    processedSheets:
+      processedSheets,
 
     alertSheetCount:
       alertSheets.length,
 
     emailCount:
-      ccEmails.size,
+      ccEmailSet.size,
 
     ccEmails:
-      Array.from(ccEmails),
+      Array.from(
+        ccEmailSet
+      ),
 
-    alertSheets,
+    alertSheets:
+      alertSheets,
 
-    sheetEmailMap,
+    sheetEmailMap:
+      sheetEmailMap,
 
-    failedSheets
+    failedSheets:
+      failedSheets
   };
 }
